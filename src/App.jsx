@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { getIntersectingPolygons } from "./component/polygonUtils";
+import {
+  getIntersectingPolygons,
+  createShiftedShapes,
+} from "./component/polygonUtils";
 
 function LongdoMap() {
   const mapRef = useRef(null);
@@ -55,10 +58,8 @@ function LongdoMap() {
                         const R = 6371000;
                         const lat1 = (point1.lat * Math.PI) / 180;
                         const lat2 = (point2.lat * Math.PI) / 180;
-                        const dLat =
-                          ((point2.lat - point1.lat) * Math.PI) / 180;
-                        const dLon =
-                          ((point2.lon - point1.lon) * Math.PI) / 180;
+                        const dLat = ((point2.lat - point1.lat) * Math.PI) / 180;
+                        const dLon = ((point2.lon - point1.lon) * Math.PI) / 180;
 
                         const a =
                           Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -66,8 +67,7 @@ function LongdoMap() {
                             Math.cos(lat2) *
                             Math.sin(dLon / 2) *
                             Math.sin(dLon / 2);
-                        const c =
-                          2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
                         return R * c;
                       };
@@ -130,21 +130,48 @@ function LongdoMap() {
         "):",
         result.polygon2
       );
-      console.log("\n📄 JSON Format:");
-      console.log(
-        JSON.stringify(
-          {
-            polygon1: result.polygon1,
-            polygon2: result.polygon2,
-            shape1IsClosed: result.shape1IsClosed,
-            shape2IsClosed: result.shape2IsClosed,
-          },
-          null,
-          2
-        )
-      );
 
-      alert("✅ พบ Shape ที่ทับกัน! ดูรายละเอียดใน Console");
+      // สร้าง Shapes ใหม่ทางขวา (เลื่อน 1km)
+      const shiftedShapes = createShiftedShapes(result, 3000);
+
+      if (shiftedShapes && longdo) {
+        console.log("🆕 สร้าง Shapes ใหม่ทางขวา:");
+        console.log(JSON.stringify(shiftedShapes, null, 2));
+
+        // วาด Polygon 1 ใหม่
+        if (shiftedShapes.shape1IsClosed) {
+          const newPolygon1 = new longdo.Polygon(shiftedShapes.polygon1, {
+            lineColor: "rgba(0, 255, 0, 0.8)",
+            fillColor: "rgba(0, 255, 0, 0.2)",
+            lineWidth: 2,
+          });
+          map.Overlays.add(newPolygon1);
+        } else {
+          const newPolyline1 = new longdo.Polyline(shiftedShapes.polygon1, {
+            lineColor: "rgba(0, 255, 0, 0.8)",
+            lineWidth: 2,
+          });
+          map.Overlays.add(newPolyline1);
+        }
+
+        // วาด Polygon 2 ใหม่
+        if (shiftedShapes.shape2IsClosed) {
+          const newPolygon2 = new longdo.Polygon(shiftedShapes.polygon2, {
+            lineColor: "rgba(0, 150, 255, 0.8)",
+            fillColor: "rgba(0, 150, 255, 0.2)",
+            lineWidth: 2,
+          });
+          map.Overlays.add(newPolygon2);
+        } else {
+          const newPolyline2 = new longdo.Polyline(shiftedShapes.polygon2, {
+            lineColor: "rgba(0, 150, 255, 0.8)",
+            lineWidth: 2,
+          });
+          map.Overlays.add(newPolyline2);
+        }
+
+        alert("✅ พบ Shape ที่ทับกัน! และสร้าง Shapes ใหม่ทางขวาแล้ว");
+      }
     } else {
       console.log("❌ ไม่พบ Shape ที่ทับกัน");
       alert("❌ ไม่พบ Shape ที่ทับกัน");

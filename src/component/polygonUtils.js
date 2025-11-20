@@ -160,10 +160,56 @@ const doShapesOverlap = (shape1, shape2, isShape1Closed, isShape2Closed) => {
 };
 
 /**
+ * เลื่อน Shape ไปทางขวา (เพิ่มค่า longitude)
+ * @param {Array} points
+ * @param {number} offsetMeters
+ * @returns {Array}
+ */
+const shiftShapeRight = (points, offsetMeters = 1000) => {
+  const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+  const metersPerDegree = 111320 * Math.cos((avgLat * Math.PI) / 180);
+  const offsetDegrees = offsetMeters / metersPerDegree;
+
+  return points.map((point) => ({
+    lon: point.lon + offsetDegrees,
+    lat: point.lat,
+  }));
+};
+
+/**
+ * สร้าง Shapes ใหม่จากผลลัพธ์การตรวจสอบ
+ * @param {Object} intersectionResult
+ * @param {number} offsetMeters
+ * @returns {Object}
+ */
+const createShiftedShapes = (intersectionResult, offsetMeters = 1000) => {
+  if (!intersectionResult) {
+    console.warn("⚠️ ไม่มีข้อมูล intersection result");
+    return null;
+  }
+
+  const shiftedPolygon1 = shiftShapeRight(
+    intersectionResult.polygon1,
+    offsetMeters
+  );
+  const shiftedPolygon2 = shiftShapeRight(
+    intersectionResult.polygon2,
+    offsetMeters
+  );
+
+  return {
+    polygon1: shiftedPolygon1,
+    polygon2: shiftedPolygon2,
+    shape1IsClosed: intersectionResult.shape1IsClosed,
+    shape2IsClosed: intersectionResult.shape2IsClosed,
+  };
+};
+
+/**
  * @param {Object} mapInstance - Longdo Map instance
  * @returns {Object|null} - ข้อมูล 2 shapes ที่ทับกัน หรือ null ถ้าไม่พบ
  */
-export const getIntersectingPolygons = (mapInstance) => {
+const getIntersectingPolygons = (mapInstance) => {
   if (!mapInstance) {
     console.warn("⚠️ ไม่พบ map instance");
     return null;
@@ -236,4 +282,7 @@ export {
   doesPolylineCrossThroughPolygon,
   doShapesOverlap,
   removeDuplicatePoints,
+  shiftShapeRight,
+  createShiftedShapes,
+  getIntersectingPolygons,
 };
