@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   getIntersectingPolygons,
-  createShiftedShapes,
+  splitPolygonByPolyline,
+  shiftShapeRight,
+  separatePolygons,
 } from "./component/polygonUtils";
 
 function LongdoMap() {
@@ -10,6 +12,9 @@ function LongdoMap() {
   const [longdo, setLongdo] = useState(null);
   const [points, setPoints] = useState([]);
   const [distance, setDistance] = useState(0);
+  const SHIFT_DISTANCE_CASE1 = 3000;
+  const SHIFT_DISTANCE_CASE2 = 5000;
+  const GAP_BETWEEN_POLYGONS = 100;
 
   useEffect(() => {
     const script = document.createElement("script");
@@ -58,8 +63,10 @@ function LongdoMap() {
                         const R = 6371000;
                         const lat1 = (point1.lat * Math.PI) / 180;
                         const lat2 = (point2.lat * Math.PI) / 180;
-                        const dLat = ((point2.lat - point1.lat) * Math.PI) / 180;
-                        const dLon = ((point2.lon - point1.lon) * Math.PI) / 180;
+                        const dLat =
+                          ((point2.lat - point1.lat) * Math.PI) / 180;
+                        const dLon =
+                          ((point2.lon - point1.lon) * Math.PI) / 180;
 
                         const a =
                           Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -67,7 +74,8 @@ function LongdoMap() {
                             Math.cos(lat2) *
                             Math.sin(dLon / 2) *
                             Math.sin(dLon / 2);
-                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                        const c =
+                          2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
                         return R * c;
                       };
@@ -131,46 +139,152 @@ function LongdoMap() {
         result.polygon2
       );
 
-      // สร้าง Shapes ใหม่ทางขวา (เลื่อน 1km)
-      const shiftedShapes = createShiftedShapes(result, 3000);
+      // กรณี Polygon ถูกตัดโดย Polyline
+      if (result.shape1IsClosed && !result.shape2IsClosed) {
+        // ✅ Log Polygon เดิมก่อนตัด
+        console.log("\n📌 === ก่อนตัด ===");
+        console.log("Polygon เดิม :", result.polygon1);
+        console.log("Polyline ที่ใช้ตัด :", result.polygon2);
 
-      if (shiftedShapes && longdo) {
-        console.log("🆕 สร้าง Shapes ใหม่ทางขวา:");
-        console.log(JSON.stringify(shiftedShapes, null, 2));
+        const splitResult = splitPolygonByPolyline(
+          result.polygon1,
+          result.polygon2
+        );
 
-        // วาด Polygon 1 ใหม่
-        if (shiftedShapes.shape1IsClosed) {
-          const newPolygon1 = new longdo.Polygon(shiftedShapes.polygon1, {
+        if (splitResult && longdo) {
+          console.log("\n✂️ === หลังตัด ===");
+          console.log("Polygon ส่วนที่ 1 (เขียว):", splitResult.polygon1);
+          console.log("Polygon ส่วนที่ 2 (ฟ้า):", splitResult.polygon2);
+          console.log("จุดตัดทั้งหมด:", splitResult.intersectionPoints);
+
+          const separated = separatePolygons(
+            splitResult.polygon1,
+            splitResult.polygon2,
+            GAP_BETWEEN_POLYGONS
+          );
+          console.log(
+            "\n🔀 === หลังแยกออกจากกัน (Gap:",
+            GAP_BETWEEN_POLYGONS,
+            "เมตร) ==="
+          );
+          console.log("Polygon 1 หลังแยก:", separated.polygon1);
+          console.log("Polygon 2 หลังแยก:", separated.polygon2);
+
+          const shiftedPolygon1 = shiftShapeRight(
+            separated.polygon1,
+            SHIFT_DISTANCE_CASE1
+          );
+          const shiftedPolygon2 = shiftShapeRight(
+            separated.polygon2,
+            SHIFT_DISTANCE_CASE1
+          );
+          console.log(
+            "\n➡️ === หลังเลื่อนไปทางขวา (",
+            SHIFT_DISTANCE_CASE1,
+            "เมตร) ==="
+          );
+          console.log("Polygon 1 สุดท้าย:", shiftedPolygon1);
+          console.log("Polygon 2 สุดท้าย:", shiftedPolygon2);
+
+          const newPolygon1 = new longdo.Polygon(shiftedPolygon1, {
             lineColor: "rgba(0, 255, 0, 0.8)",
             fillColor: "rgba(0, 255, 0, 0.2)",
-            lineWidth: 2,
+            lineWidth: 3,
           });
           map.Overlays.add(newPolygon1);
-        } else {
-          const newPolyline1 = new longdo.Polyline(shiftedShapes.polygon1, {
-            lineColor: "rgba(0, 255, 0, 0.8)",
-            lineWidth: 2,
-          });
-          map.Overlays.add(newPolyline1);
-        }
 
-        // วาด Polygon 2 ใหม่
-        if (shiftedShapes.shape2IsClosed) {
-          const newPolygon2 = new longdo.Polygon(shiftedShapes.polygon2, {
+          const newPolygon2 = new longdo.Polygon(shiftedPolygon2, {
             lineColor: "rgba(0, 150, 255, 0.8)",
             fillColor: "rgba(0, 150, 255, 0.2)",
-            lineWidth: 2,
+            lineWidth: 3,
           });
           map.Overlays.add(newPolygon2);
-        } else {
-          const newPolyline2 = new longdo.Polyline(shiftedShapes.polygon2, {
-            lineColor: "rgba(0, 150, 255, 0.8)",
-            lineWidth: 2,
-          });
-          map.Overlays.add(newPolyline2);
-        }
 
-        alert("✅ พบ Shape ที่ทับกัน! และสร้าง Shapes ใหม่ทางขวาแล้ว");
+          console.log("✅ แบ่ง Polygon และสร้างทางขวาสำเร็จ (มีช่องว่าง)");
+          alert(
+            `✅ แบ่ง Polygon ออกเป็น 2 ส่วนสำเร็จ!\n\n` +
+              `Polygon 1: ${splitResult.polygon1.length} จุด (สีเขียว)\n` +
+              `Polygon 2: ${splitResult.polygon2.length} จุด (สีฟ้า)\n` +
+              `จุดตัด: ${splitResult.intersectionPoints.length} จุด\n` +
+              `ระยะห่างระหว่าง Polygons: ${GAP_BETWEEN_POLYGONS} เมตร`
+          );
+        } else {
+          alert("❌ ไม่สามารถแบ่ง Polygon ได้ (ต้องมีจุดตัดอย่างน้อย 2 จุด)");
+        }
+      }
+      // กรณี Polyline ถูกตัดโดย Polygon (สลับตำแหน่ง)
+      else if (!result.shape1IsClosed && result.shape2IsClosed) {
+        console.log("\n📌 === ก่อนตัด ===");
+        console.log("Polyline ที่ใช้ตัด (ฟ้า):", result.polygon1);
+        console.log("Polygon เดิม (ชมพู):", result.polygon2);
+
+        const splitResult = splitPolygonByPolyline(
+          result.polygon2,
+          result.polygon1
+        );
+
+        if (splitResult && longdo) {
+          console.log("\n✂️ === หลังตัด ===");
+          console.log("Polygon ส่วนที่ 1 (เขียว):", splitResult.polygon1);
+          console.log("Polygon ส่วนที่ 2 (ฟ้า):", splitResult.polygon2);
+          console.log("จุดตัดทั้งหมด:", splitResult.intersectionPoints);
+
+          const separated = separatePolygons(
+            splitResult.polygon1,
+            splitResult.polygon2,
+            GAP_BETWEEN_POLYGONS
+          );
+          console.log(
+            "\n🔀 === หลังแยกออกจากกัน (Gap:",
+            GAP_BETWEEN_POLYGONS,
+            "เมตร) ==="
+          );
+          console.log("Polygon 1 หลังแยก:", separated.polygon1);
+          console.log("Polygon 2 หลังแยก:", separated.polygon2);
+
+          const shiftedPolygon1 = shiftShapeRight(
+            separated.polygon1,
+            SHIFT_DISTANCE_CASE2
+          );
+          const shiftedPolygon2 = shiftShapeRight(
+            separated.polygon2,
+            SHIFT_DISTANCE_CASE2
+          );
+          console.log(
+            "\n➡️ === หลังเลื่อนไปทางขวา (",
+            SHIFT_DISTANCE_CASE2,
+            "เมตร) ==="
+          );
+          console.log("Polygon 1 สุดท้าย:", shiftedPolygon1);
+          console.log("Polygon 2 สุดท้าย:", shiftedPolygon2);
+
+          const newPolygon1 = new longdo.Polygon(shiftedPolygon1, {
+            lineColor: "rgba(0, 255, 0, 0.8)",
+            fillColor: "rgba(0, 255, 0, 0.2)",
+            lineWidth: 3,
+          });
+          map.Overlays.add(newPolygon1);
+
+          const newPolygon2 = new longdo.Polygon(shiftedPolygon2, {
+            lineColor: "rgba(0, 150, 255, 0.8)",
+            fillColor: "rgba(0, 150, 255, 0.2)",
+            lineWidth: 3,
+          });
+          map.Overlays.add(newPolygon2);
+
+          console.log("✅ แบ่ง Polygon และสร้างทางขวาสำเร็จ (มีช่องว่าง)");
+          alert(
+            `✅ แบ่ง Polygon ออกเป็น 2 ส่วนสำเร็จ!\n\n` +
+              `Polygon 1: ${splitResult.polygon1.length} จุด (สีเขียว)\n` +
+              `Polygon 2: ${splitResult.polygon2.length} จุด (สีฟ้า)\n` +
+              `จุดตัด: ${splitResult.intersectionPoints.length} จุด\n` +
+              `ระยะห่างระหว่าง Polygons: ${GAP_BETWEEN_POLYGONS} เมตร`
+          );
+        } else {
+          alert("❌ ไม่สามารถแบ่ง Polygon ได้ (ต้องมีจุดตัดอย่างน้อย 2 จุด)");
+        }
+      } else {
+        alert("⚠️ ต้องเป็นการตัดระหว่าง Polygon กับ Polyline เท่านั้น");
       }
     } else {
       console.log("❌ ไม่พบ Shape ที่ทับกัน");

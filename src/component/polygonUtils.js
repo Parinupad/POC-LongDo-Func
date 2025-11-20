@@ -206,8 +206,150 @@ const createShiftedShapes = (intersectionResult, offsetMeters = 1000) => {
 };
 
 /**
- * @param {Object} mapInstance - Longdo Map instance
- * @returns {Object|null} - ข้อมูล 2 shapes ที่ทับกัน หรือ null ถ้าไม่พบ
+ * หาจุดตัดระหว่างเส้นสองเส้น
+ */
+const getLineIntersection = (p1, p2, p3, p4) => {
+  const x1 = p1.lon,
+    y1 = p1.lat;
+  const x2 = p2.lon,
+    y2 = p2.lat;
+  const x3 = p3.lon,
+    y3 = p3.lat;
+  const x4 = p4.lon,
+    y4 = p4.lat;
+
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 0.0000001) return null;
+
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+
+  if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+    return {
+      lon: x1 + t * (x2 - x1),
+      lat: y1 + t * (y2 - y1),
+    };
+  }
+  return null;
+};
+
+/**
+ * หาจุดตัดทั้งหมดระหว่าง Polyline และ Polygon
+ */
+const findAllIntersectionPoints = (polyline, polygon) => {
+  const intersections = [];
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const p1 = polyline[i];
+    const p2 = polyline[i + 1];
+
+    for (let j = 0; j < polygon.length; j++) {
+      const p3 = polygon[j];
+      const p4 = polygon[(j + 1) % polygon.length];
+
+      const intersection = getLineIntersection(p1, p2, p3, p4);
+      if (intersection) {
+        intersections.push({
+          point: intersection,
+          polylineSegment: i,
+          polygonSegment: j,
+        });
+      }
+    }
+  }
+
+  return intersections;
+};
+
+/**
+ * แบ่ง Polygon ออกเป็น 2 ส่วนตาม Polyline
+ */
+const splitPolygonByPolyline = (polygon, polyline) => {
+  const intersections = findAllIntersectionPoints(polyline, polygon);
+
+  if (intersections.length < 2) {
+    console.log("⚠️ ต้องมีจุดตัดอย่างน้อย 2 จุด");
+    return null;
+  }
+
+  console.log("🔍 พบจุดตัด:", intersections.length, "จุด");
+
+  // เรียงจุดตัดตามลำดับบน polygon
+  intersections.sort((a, b) => a.polygonSegment - b.polygonSegment);
+
+  const firstIntersection = intersections[0];
+  const lastIntersection = intersections[intersections.length - 1];
+
+  // สร้าง Polygon ส่วนที่ 1
+  const polygon1 = [];
+
+  // เพิ่มจุดตัดแรก
+  polygon1.push(firstIntersection.point);
+
+  // เพิ่มจุดของ polyline ระหว่างจุดตัด
+  for (
+    let i = firstIntersection.polylineSegment + 1;
+    i <= lastIntersection.polylineSegment;
+    i++
+  ) {
+    if (i < polyline.length) {
+      polygon1.push(polyline[i]);
+    }
+  }
+
+  // เพิ่มจุดตัดสุดท้าย
+  polygon1.push(lastIntersection.point);
+
+  // เพิ่มจุดของ polygon จากจุดตัดสุดท้ายไปจุดตัดแรก (ทางด้านหนึ่ง)
+  for (
+    let i = lastIntersection.polygonSegment + 1;
+    i !== firstIntersection.polygonSegment + 1;
+    i = (i + 1) % polygon.length
+  ) {
+    polygon1.push(polygon[i]);
+    if (i === firstIntersection.polygonSegment) break;
+  }
+
+  // สร้าง Polygon ส่วนที่ 2
+  const polygon2 = [];
+
+  // เพิ่มจุดตัดแรก
+  polygon2.push(firstIntersection.point);
+
+  // เพิ่มจุดของ polygon ทางด้านอีกด้าน
+  for (
+    let i = firstIntersection.polygonSegment + 1;
+    i !== lastIntersection.polygonSegment + 1;
+    i = (i + 1) % polygon.length
+  ) {
+    polygon2.push(polygon[i]);
+    if (polygon2.length > polygon.length) break;
+  }
+
+  // เพิ่มจุดตัดสุดท้าย
+  polygon2.push(lastIntersection.point);
+
+  // เพิ่มจุดของ polyline กลับไปจุดตัดแรก
+  for (
+    let i = lastIntersection.polylineSegment;
+    i >= firstIntersection.polylineSegment + 1;
+    i--
+  ) {
+    if (i < polyline.length) {
+      polygon2.push(polyline[i]);
+    }
+  }
+
+  return {
+    polygon1: removeDuplicatePoints(polygon1),
+    polygon2: removeDuplicatePoints(polygon2),
+    intersectionPoints: intersections.map((i) => i.point),
+  };
+};
+
+/**
+ * @param {Object} mapInstance
+ * @returns {Object|null}
  */
 const getIntersectingPolygons = (mapInstance) => {
   if (!mapInstance) {
@@ -275,6 +417,56 @@ const getIntersectingPolygons = (mapInstance) => {
   }
 };
 
+/**
+ *
+ * @param {Array} polygon1
+ * @param {Array} polygon2
+ * @param {number} gapMeters
+ * @returns {Object}
+ */
+const separatePolygons = (polygon1, polygon2, gapMeters = 500) => {
+  const getCentroid = (polygon) => {
+    const sumLat = polygon.reduce((sum, p) => sum + p.lat, 0);
+    const sumLon = polygon.reduce((sum, p) => sum + p.lon, 0);
+    return {
+      lat: sumLat / polygon.length,
+      lon: sumLon / polygon.length,
+    };
+  };
+
+  const centroid1 = getCentroid(polygon1);
+  const centroid2 = getCentroid(polygon2);
+
+  // คำนวณทิศทางระหว่างจุดศูนย์กลาง
+  const deltaLat = centroid2.lat - centroid1.lat;
+  const deltaLon = centroid2.lon - centroid1.lon;
+  const distance = Math.sqrt(deltaLat * deltaLat + deltaLon * deltaLon);
+  const dirLat = deltaLat / distance;
+  const dirLon = deltaLon / distance;
+  const avgLat = (centroid1.lat + centroid2.lat) / 2;
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLon = 111320 * Math.cos((avgLat * Math.PI) / 180);
+  const offsetLat = ((gapMeters / 2) * dirLat) / metersPerDegreeLat;
+  const offsetLon = ((gapMeters / 2) * dirLon) / metersPerDegreeLon;
+
+  // เลื่อน Polygon 1 ไปทางหนึ่ง
+  const shiftedPolygon1 = polygon1.map((point) => ({
+    lat: point.lat - offsetLat,
+    lon: point.lon - offsetLon,
+  }));
+
+  // เลื่อน Polygon 2 ไปอีกทาง
+  const shiftedPolygon2 = polygon2.map((point) => ({
+    lat: point.lat + offsetLat,
+    lon: point.lon + offsetLon,
+  }));
+
+  return {
+    polygon1: shiftedPolygon1,
+    polygon2: shiftedPolygon2,
+  };
+};
+
 export {
   doSegmentsIntersect,
   isPointInPolygon,
@@ -285,4 +477,8 @@ export {
   shiftShapeRight,
   createShiftedShapes,
   getIntersectingPolygons,
+  getLineIntersection,
+  findAllIntersectionPoints,
+  splitPolygonByPolyline,
+  separatePolygons,
 };
